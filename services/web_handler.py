@@ -308,11 +308,24 @@ class WebHandler:
             while current_question > 0:
                 logger.info(f"🔄 Обработка вопроса {current_question}")
                 
-                # Получаем текст вопроса
-                question_text = await page.evaluate('''() => {
-                    const question = document.querySelector('span.value span.xforms-value');
-                    return question ? question.textContent : null;
-                }''')
+                # Получаем текст вопроса с новым XPath селектором
+                try:
+                    question_element = await page.wait_for_selector('//*[@id="xsltforms-subform-0-output-14_4_2_"]/span/span/p')
+                    question_text = await question_element.inner_text()
+                    if not question_text:
+                        logger.error("❌ Текст вопроса пуст")
+                        raise Exception("Не удалось получить текст вопроса")
+                    
+                    logger.info(f"✅ Получен текст вопроса: {question_text[:100]}...")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при получении текста вопроса: {e}")
+                    # Делаем скриншот для отладки
+                    await page.screenshot(path=f"error_question_{current_question}.png")
+                    await self._send_error_screenshot(
+                        f"error_question_{current_question}.png",
+                        f"Ошибка при получении текста вопроса {current_question}"
+                    )
+                    raise
 
                 await page.screenshot(path=f"question_{current_question}.png")
                 await self._send_info_screenshot(
