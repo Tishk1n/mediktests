@@ -4,6 +4,7 @@ from aiogram.types import FSInputFile
 import os
 import subprocess
 import logging
+import re
 
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,6 +17,7 @@ class WebHandler:
         self.user_id = user_id
         self.browser = None
         self.context = None
+        self.answers_url = "https://www.tests-exam.ru/vopros.html?id_test=719&id_vopros=25565"
         self._ensure_playwright_browsers()
 
     def _ensure_playwright_browsers(self):
@@ -222,25 +224,110 @@ class WebHandler:
             )
             raise
 
-    async def process_test(self, page):
-        correct_answers = 0
-        total_questions = 60
-        
-        for _ in range(total_questions):
-            # Находим правильный ответ (предполагаем, что он есть в коде страницы)
-            answer_element = await page.query_selector('[data-correct="true"]')
-            if answer_element:
-                await answer_element.click()
-                correct_answers += 1
+    async def get_answer(self, page, question_text: str) -> str:
+        try:
+            logger.info("🔄 Ищем ответ на вопрос...")
+            await page.goto(self.answers_url)
+            await page.fill('input.zbz-input-clearable', question_text)
             
-            # Переходим к следующему вопросу
-            next_button = await page.query_selector('button:has-text("Далее")')
-            if next_button:
-                await next_button.click()
-            await page.wait_for_timeout(1000)  # Ждем загрузки следующего вопроса
-        
-        return {
-            "correct": correct_answers,
-            "total": total_questions,
-            "percentage": round((correct_answers / total_questions) * 100, 2)
-        }
+            await page.screenshot(path="search_question.png")
+            await self._send_info_screenshot(
+                "search_question.png",
+                f"Ищем ответ на вопрос:\n{question_text[:100]}..."
+            )
+            
+            await page.click('input[type="submit"][value*="Найти"]')
+            await page.wait_for_load_state("networkidle")
+            
+            # Ищем правильный ответ (с жирным шрифтом)
+            answer = await page.evaluate('''() => {
+                const bold = document.querySelector('.b li[style*="font-weight:bold"]');
+                return bold ? bold.textContent : null;
+            }''')
+            
+            if answer:
+                logger.info(f"✅ Найден ответ: {answer}")
+                return answer
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при поиске ответа: {e}")
+            return None
+
+    async def process_test(self, page, test_url: str):
+        try:
+            logger.info("🔄 Переходим по ссылке на тест...")
+            await page.goto(test_url)
+            await page.wait_for_load_state("networkidle")
+            
+            # Переходим к списку вопросов
+            await page.click('#xsltforms-subform-2-label-2_2_2_6_2_10_4_2_')
+            await page.wait_for_load_state("networkidle")
+            
+            # Находим последний вопрос (80)
+            await page.click('span.xforms-value:has-text("80")')
+            await page.wait_for_load_state("networkidle")
+            
+            correct_answers = 0
+            current_question = 80
+
+            while current_question > 0:
+                logger.info(f"🔄 Обработка вопроса {current_question}")
+                
+                # Получаем текст вопроса
+                question_text = await page.evaluate('''() => {
+                    const question = document.querySelector('span.value span.xforms-value');
+                    return question ? question.textContent : null;
+                }''')
+
+                await page.screenshot(path=f"question_{current_question}.png")
+                await self._send_info_screenshot(
+                    f"question_{current_question}.png",
+                    f"Вопрос {current_question}:\n{question_text[:100]}..."
+                )
+
+                # Получаем правильный ответ
+                correct_answer = await self.get_answer(page, question_text)
+                
+                if correct_answer:
+                    # Возвращаемся на страницу теста
+                    await page.goto(test_url)
+                    await page.wait_for_load_state("networkidle")
+                    
+                    # Ищем и выбираем правильный вариант ответа
+                    answers = await page.query_selector_all('.testRadioButton')
+                    for answer in answers:
+                        answer_text = await answer.evaluate('el => el.closest("tr").textContent')
+                        if correct_answer in answer_text:
+                            await answer.click()
+                            correct_answers += 1
+                            break
+                
+                # Возвращаемся к предыдущему вопросу
+                await page.click('#xsltforms-subform-4-label-2_2_2_2_2_10_4_2_')
+                current_question -= 1
+                await page.wait_for_load_state("networkidle")
+                
+                # Проверяем, решен ли предыдущий вопрос
+                is_answered = await page.evaluate('''() => {
+                    return document.querySelector('.fa-check-circle') !== null;
+                }''')
+                
+                if is_answered:
+                    logger.info("✅ Достигнут уже решенный вопрос")
+                    break
+
+            return {
+                "correct": correct_answers,
+                "total": 80 - current_question,
+                "percentage": round((correct_answers / (80 - current_question)) * 100, 2)
+            }
+
+        except Exception as e:
+            error_path = "error_processing_test.png"
+            await page.screenshot(path=error_path)
+            await self._send_error_screenshot(
+                error_path,
+                f"❌ Ошибка при выполнении теста: {str(e)}"
+            )
+            raise

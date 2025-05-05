@@ -1,7 +1,7 @@
 from database.sqlite import Database
 from services.web_handler import WebHandler
 
-async def start_testing_process(user_id: int, db: Database, bot=None) -> dict:
+async def start_testing_process(user_id: int, db: Database, bot=None, test_url: str = None) -> dict:
     web = None
     try:
         credentials = db.get_user_credentials(user_id)
@@ -12,8 +12,7 @@ async def start_testing_process(user_id: int, db: Database, bot=None) -> dict:
         web = WebHandler(bot_instance=bot, user_id=user_id)
         
         page = await web.login(login, password)
-        test_page = await web.start_test(page)
-        result = await web.process_test(test_page)
+        result = await web.process_test(page, test_url)
         
         # Сохраняем результат в БД
         db.save_test_result(

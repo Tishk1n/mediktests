@@ -13,6 +13,7 @@ router = Router()
 class UserAuth(StatesGroup):
     waiting_for_login = State()
     waiting_for_password = State()
+    waiting_for_test_url = State()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, db: Database):
@@ -57,26 +58,35 @@ async def process_password(message: Message, state: FSMContext, db: Database):
     await state.clear()
 
 @router.callback_query(F.data == "start_test")
-async def start_test(callback: CallbackQuery, db: Database):
+async def start_test(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
+        "🔗 Пожалуйста, отправьте ссылку на начатый тест:"
+    )
+    await state.set_state(UserAuth.waiting_for_test_url)
+
+@router.message(UserAuth.waiting_for_test_url)
+async def process_test_url(message: Message, state: FSMContext, db: Database):
+    await state.clear()
+    await message.answer(
         "🔄 Начинаю процесс тестирования...\n"
         "Пожалуйста, подождите"
     )
     
     result = await start_testing_process(
-        user_id=callback.from_user.id,
+        user_id=message.from_user.id,
         db=db,
-        bot=callback.bot
+        bot=message.bot,
+        test_url=message.text
     )
     
     if "error" in result:
-        await callback.message.answer(
+        await message.answer(
             f"❌ {result['error']}",
             reply_markup=get_main_keyboard()
         )
         return
     
-    await callback.message.answer(
+    await message.answer(
         f"📊 Результат тестирования:\n"
         f"Правильных ответов: {result['correct']}/{result['total']}\n"
         f"Процент: {result['percentage']}%",
