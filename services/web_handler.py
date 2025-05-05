@@ -259,15 +259,49 @@ class WebHandler:
             logger.info("🔄 Переходим по ссылке на тест...")
             await page.goto(test_url)
             await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)  # Даем странице полностью загрузиться
             
-            # Переходим к списку вопросов
-            await page.click('#xsltforms-subform-2-label-2_2_2_6_2_10_4_2_')
+            await page.screenshot(path="before_list.png")
+            await self._send_info_screenshot(
+                "before_list.png",
+                "Переходим к списку вопросов..."
+            )
+            
+            # Нажимаем кнопку "К списку вопросов" с новым селектором
+            try:
+                list_button = await page.wait_for_selector(
+                    'button span#xsltforms-subform-0-label-2_2_2_6_2_10_4_2_',
+                    timeout=10000
+                )
+                if list_button:
+                    await list_button.click()
+                else:
+                    logger.error("❌ Кнопка 'К списку вопросов' не найдена")
+                    raise Exception("Кнопка списка вопросов не найдена")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при поиске кнопки списка: {e}")
+                # Пробуем альтернативный способ
+                try:
+                    await page.evaluate('''() => {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const listButton = buttons.find(b => b.textContent.includes('К списку вопросов'));
+                        if (listButton) listButton.click();
+                    }''')
+                except Exception as e2:
+                    logger.error(f"❌ Альтернативный метод также не сработал: {e2}")
+                    raise
+            
             await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)
             
-            # Находим последний вопрос (80)
-            await page.click('span.xforms-value:has-text("80")')
-            await page.wait_for_load_state("networkidle")
+            await page.screenshot(path="questions_list.png")
+            await self._send_info_screenshot(
+                "questions_list.png",
+                "Список вопросов открыт"
+            )
             
+            # Остальная логика обработки теста
             correct_answers = 0
             current_question = 80
 
