@@ -1,5 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright, TimeoutError
+from aiogram.types import FSInputFile
 import os
 import subprocess
 import logging
@@ -28,12 +29,12 @@ class WebHandler:
     async def _send_error_screenshot(self, screenshot_path: str, error_message: str):
         if self.bot and self.user_id:
             try:
-                with open(screenshot_path, 'rb') as photo:
-                    await self.bot.send_photo(
-                        chat_id=self.user_id,
-                        photo=photo,
-                        caption=f"❌ {error_message}"
-                    )
+                photo = FSInputFile(screenshot_path)
+                await self.bot.send_photo(
+                    chat_id=self.user_id,
+                    photo=photo,
+                    caption=f"❌ {error_message}"
+                )
                 os.remove(screenshot_path)  # Удаляем файл после отправки
             except Exception as e:
                 logger.error(f"Ошибка при отправке скриншота: {e}")
@@ -41,12 +42,12 @@ class WebHandler:
     async def _send_info_screenshot(self, screenshot_path: str, message: str):
         if self.bot and self.user_id:
             try:
-                with open(screenshot_path, 'rb') as photo:
-                    await self.bot.send_photo(
-                        chat_id=self.user_id,
-                        photo=photo,
-                        caption=f"ℹ️ {message}"
-                    )
+                photo = FSInputFile(screenshot_path)
+                await self.bot.send_photo(
+                    chat_id=self.user_id,
+                    photo=photo,
+                    caption=f"ℹ️ {message}"
+                )
                 os.remove(screenshot_path)
             except Exception as e:
                 logger.error(f"Ошибка при отправке скриншота: {e}")
