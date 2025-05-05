@@ -14,8 +14,10 @@ class WebHandler:
         self.base_url = "http://selftest-mpe.mededtech.ru"
         self.bot = bot_instance
         self.user_id = user_id
+        self.browser = None
+        self.context = None
         self._ensure_playwright_browsers()
-    
+
     def _ensure_playwright_browsers(self):
         try:
             if not os.path.exists(os.path.expanduser('~/.cache/ms-playwright')):
@@ -25,6 +27,26 @@ class WebHandler:
         except Exception as e:
             logger.error(f"❌ Ошибка при установке браузеров: {e}")
             raise
+
+    async def _init_browser(self):
+        if not self.browser:
+            logger.info("🔄 Запуск браузера...")
+            p = await async_playwright().start()
+            self.browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-dev-shm-usage']
+            )
+            self.context = await self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            logger.info("✅ Браузер запущен успешно")
+
+    async def close(self):
+        if self.context:
+            await self.context.close()
+        if self.browser:
+            await self.browser.close()
 
     async def _send_error_screenshot(self, screenshot_path: str, error_message: str):
         if self.bot and self.user_id:
@@ -55,107 +77,95 @@ class WebHandler:
     async def login(self, login: str, password: str):
         logger.info("🔄 Начинаем процесс авторизации...")
         
-        async with async_playwright() as p:
-            try:
-                logger.info("🔄 Запуск браузера...")
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-dev-shm-usage']
-                )
-                logger.info("✅ Браузер запущен успешно")
+        try:
+            await self._init_browser()
+            page = await self.context.new_page()
+            page.set_default_timeout(60000)
+            
+            # Первая часть навигации по fmza.ru
+            steps = [
+                ("Переход на сайт fmza.ru", 
+                 lambda: page.goto("https://fmza.ru", wait_until="networkidle")),
                 
-                context = await browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                )
-                page = await context.new_page()
-                page.set_default_timeout(60000)
+                ("Поиск 'Первичная аккредитация'", 
+                 lambda: page.wait_for_selector('a:has-text("Первичная аккредитация (СПО)")')),
+                ("Клик по 'Первичная аккредитация'", 
+                 lambda: page.click('a:has-text("Первичная аккредитация (СПО)")')),
                 
-                # Первая часть навигации по fmza.ru
-                steps = [
-                    ("Переход на сайт fmza.ru", 
-                     lambda: page.goto("https://fmza.ru", wait_until="networkidle")),
-                    
-                    ("Поиск 'Первичная аккредитация'", 
-                     lambda: page.wait_for_selector('a:has-text("Первичная аккредитация (СПО)")')),
-                    ("Клик по 'Первичная аккредитация'", 
-                     lambda: page.click('a:has-text("Первичная аккредитация (СПО)")')),
-                    
-                    ("Поиск 'Специальности СПО'",
-                     lambda: page.wait_for_selector('a:has-text("Специальности СПО")')),
-                    ("Клик по 'Специальности СПО'",
-                     lambda: page.click('a:has-text("Специальности СПО")')),
-                ]
-                
-                # Выполняем первую часть навигации
-                for step_name, step_action in steps:
-                    try:
-                        logger.info(f"🔄 {step_name}...")
-                        await step_action()
-                        await page.wait_for_load_state("networkidle")
-                        
-                        # Делаем и отправляем скриншот каждого шага
-                        screenshot_path = f"step_{step_name.lower().replace(' ', '_')}.png"
-                        await page.screenshot(path=screenshot_path)
-                        await self._send_info_screenshot(
-                            screenshot_path,
-                            f"Шаг: {step_name} - успешно"
-                        )
-                        
-                        logger.info(f"✅ {step_name} - успешно")
-                    except Exception as e:
-                        error_path = f"error_{step_name.lower().replace(' ', '_')}.png"
-                        await page.screenshot(path=error_path)
-                        await self._send_error_screenshot(
-                            error_path,
-                            f"Ошибка на шаге '{step_name}': {str(e)}"
-                        )
-                        raise
-
-                # Переход на новый сайт и авторизация
+                ("Поиск 'Специальности СПО'",
+                 lambda: page.wait_for_selector('a:has-text("Специальности СПО")')),
+                ("Клик по 'Специальности СПО'",
+                 lambda: page.click('a:has-text("Специальности СПО")')),
+            ]
+            
+            # Выполняем первую часть навигации
+            for step_name, step_action in steps:
                 try:
-                    logger.info("🔄 Переход на сайт тестирования...")
-                    await page.goto(self.base_url, wait_until="networkidle")
-                    logger.info("✅ Переход выполнен успешно")
-
-                    logger.info("🔄 Ожидание формы авторизации...")
-                    await page.wait_for_selector('input[name="j_username"]')
-                    logger.info("🔄 Заполнение формы авторизации...")
-                    
-                    await page.fill('input[name="j_username"]', login)
-                    await page.fill('input[name="j_password"]', password)
-                    
-                    await page.screenshot(path="before_login.png")
-                    await self._send_info_screenshot(
-                        "before_login.png",
-                        "Форма авторизации заполнена, выполняем вход..."
-                    )
-                    
-                    await page.click('input.login-button[type="submit"]')
+                    logger.info(f"🔄 {step_name}...")
+                    await step_action()
                     await page.wait_for_load_state("networkidle")
                     
-                    await page.screenshot(path="after_login.png")
+                    # Делаем и отправляем скриншот каждого шага
+                    screenshot_path = f"step_{step_name.lower().replace(' ', '_')}.png"
+                    await page.screenshot(path=screenshot_path)
                     await self._send_info_screenshot(
-                        "after_login.png",
-                        "✅ Авторизация выполнена"
+                        screenshot_path,
+                        f"Шаг: {step_name} - успешно"
                     )
                     
-                    return page
-
+                    logger.info(f"✅ {step_name} - успешно")
                 except Exception as e:
-                    error_path = "error_auth.png"
+                    error_path = f"error_{step_name.lower().replace(' ', '_')}.png"
                     await page.screenshot(path=error_path)
                     await self._send_error_screenshot(
                         error_path,
-                        f"Ошибка при авторизации: {str(e)}"
+                        f"Ошибка на шаге '{step_name}': {str(e)}"
                     )
                     raise
-                    
+
+            # Переход на новый сайт и авторизация
+            try:
+                logger.info("🔄 Переход на сайт тестирования...")
+                await page.goto(self.base_url, wait_until="networkidle")
+                logger.info("✅ Переход выполнен успешно")
+
+                logger.info("🔄 Ожидание формы авторизации...")
+                await page.wait_for_selector('input[name="j_username"]')
+                logger.info("🔄 Заполнение формы авторизации...")
+                
+                await page.fill('input[name="j_username"]', login)
+                await page.fill('input[name="j_password"]', password)
+                
+                await page.screenshot(path="before_login.png")
+                await self._send_info_screenshot(
+                    "before_login.png",
+                    "Форма авторизации заполнена, выполняем вход..."
+                )
+                
+                await page.click('input.login-button[type="submit"]')
+                await page.wait_for_load_state("networkidle")
+                
+                await page.screenshot(path="after_login.png")
+                await self._send_info_screenshot(
+                    "after_login.png",
+                    "✅ Авторизация выполнена"
+                )
+                
+                return page
+
             except Exception as e:
-                logger.error(f"❌ Критическая ошибка: {str(e)}")
-                if 'browser' in locals():
-                    await browser.close()
+                error_path = "error_auth.png"
+                await page.screenshot(path=error_path)
+                await self._send_error_screenshot(
+                    error_path,
+                    f"Ошибка при авторизации: {str(e)}"
+                )
                 raise
+                
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка: {str(e)}")
+            await self.close()
+            raise
 
     async def start_test(self, page):
         try:
