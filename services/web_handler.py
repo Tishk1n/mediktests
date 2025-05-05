@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class WebHandler:
     def __init__(self):
-        self.base_url = "https://selftest-mpe.medtech.ru"
+        self.base_url = "http://selftest-mpe.mededtech.ru"
         self._ensure_playwright_browsers()
     
     def _ensure_playwright_browsers(self):
@@ -42,38 +42,23 @@ class WebHandler:
                 page = await context.new_page()
                 page.set_default_timeout(60000)
                 
-                # Навигация по сайту с логированием каждого шага
+                # Первая часть навигации по fmza.ru
                 steps = [
                     ("Переход на сайт fmza.ru", 
                      lambda: page.goto("https://fmza.ru", wait_until="networkidle")),
                     
                     ("Поиск 'Первичная аккредитация'", 
-                     lambda: page.wait_for_selector('a:has-text("Первичная аккредитация")')),
+                     lambda: page.wait_for_selector('a:has-text("Первичная аккредитация (СПО)")')),
                     ("Клик по 'Первичная аккредитация'", 
-                     lambda: page.click('a:has-text("Первичная аккредитация")')),
+                     lambda: page.click('a:has-text("Первичная аккредитация (СПО)")')),
                     
                     ("Поиск 'Специальности СПО'",
                      lambda: page.wait_for_selector('a:has-text("Специальности СПО")')),
                     ("Клик по 'Специальности СПО'",
                      lambda: page.click('a:has-text("Специальности СПО")')),
-                    
-                    ("Поиск 'Фармация'",
-                     lambda: page.wait_for_selector('a:has-text("Фармация")')),
-                    ("Клик по 'Фармация'",
-                     lambda: page.click('a:has-text("Фармация")')),
-                    
-                    ("Поиск 'Тестовые задания'",
-                     lambda: page.wait_for_selector('a:has-text("Тестовые задания")')),
-                    ("Клик по 'Тестовые задания'",
-                     lambda: page.click('a:has-text("Тестовые задания")')),
-                    
-                    ("Поиск 'Репетиционный экзамен'",
-                     lambda: page.wait_for_selector('a:has-text("Репетиционный экзамен")')),
-                    ("Клик по 'Репетиционный экзамен'",
-                     lambda: page.click('a:has-text("Репетиционный экзамен")')),
                 ]
                 
-                # Выполняем каждый шаг с логированием
+                # Выполняем первую часть навигации
                 for step_name, step_action in steps:
                     try:
                         logger.info(f"🔄 {step_name}...")
@@ -84,17 +69,31 @@ class WebHandler:
                         logger.error(f"❌ {step_name} - ошибка: {str(e)}")
                         await page.screenshot(path=f"error_{step_name.lower().replace(' ', '_')}.png")
                         raise
-                
-                # Авторизация
+
+                # Переход на новый сайт и авторизация
                 try:
+                    logger.info("🔄 Переход на сайт тестирования...")
+                    await page.goto(self.base_url, wait_until="networkidle")
+                    logger.info("✅ Переход выполнен успешно")
+
                     logger.info("🔄 Ожидание формы авторизации...")
                     await page.wait_for_selector('input[name="login"]')
                     logger.info("🔄 Заполнение формы авторизации...")
                     await page.fill('input[name="login"]', login)
                     await page.fill('input[name="password"]', password)
                     await page.click('button[type="submit"]')
-                    logger.info("✅ Авторизация выполнена")
-                    return page
+                    logger.info("✅ Форма авторизации заполнена")
+
+                    # Проверка успешной авторизации
+                    try:
+                        await page.wait_for_selector('.user-menu', timeout=5000)
+                        logger.info("✅ Авторизация успешна")
+                        return page
+                    except TimeoutError:
+                        logger.error("❌ Ошибка авторизации: не найдено подтверждение входа")
+                        await page.screenshot(path="error_auth_failed.png")
+                        raise Exception("Не удалось авторизоваться")
+
                 except Exception as e:
                     logger.error(f"❌ Ошибка при авторизации: {str(e)}")
                     await page.screenshot(path="error_auth.png")
