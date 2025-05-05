@@ -122,11 +122,9 @@ class WebHandler:
                     await page.wait_for_selector('input[name="j_username"]')
                     logger.info("🔄 Заполнение формы авторизации...")
                     
-                    # Используем новые селекторы
                     await page.fill('input[name="j_username"]', login)
                     await page.fill('input[name="j_password"]', password)
                     
-                    # Скриншот перед нажатием кнопки входа
                     await page.screenshot(path="before_login.png")
                     await self._send_info_screenshot(
                         "before_login.png",
@@ -134,26 +132,15 @@ class WebHandler:
                     )
                     
                     await page.click('input.login-button[type="submit"]')
-
-                    # Проверка успешной авторизации
-                    try:
-                        await page.wait_for_selector('.user-menu', timeout=5000)
-                        # Скриншот успешной авторизации
-                        await page.screenshot(path="login_success.png")
-                        await self._send_info_screenshot(
-                            "login_success.png",
-                            "✅ Авторизация успешна"
-                        )
-                        return page
-                    except TimeoutError:
-                        logger.error("❌ Ошибка авторизации: не найдено подтверждение входа")
-                        error_path = "error_auth_failed.png"
-                        await page.screenshot(path=error_path)
-                        await self._send_error_screenshot(
-                            error_path,
-                            "Ошибка авторизации: неверный логин или пароль"
-                        )
-                        raise Exception("Не удалось авторизоваться")
+                    await page.wait_for_load_state("networkidle")
+                    
+                    await page.screenshot(path="after_login.png")
+                    await self._send_info_screenshot(
+                        "after_login.png",
+                        "✅ Авторизация выполнена"
+                    )
+                    
+                    return page
 
                 except Exception as e:
                     error_path = "error_auth.png"
@@ -173,55 +160,49 @@ class WebHandler:
     async def start_test(self, page):
         try:
             logger.info("🔄 Начинаем создание теста...")
+            await page.wait_for_load_state("networkidle")
             
             # Шаг 1: Нажатие кнопки "Пройти тестирование"
-            logger.info("🔄 Поиск кнопки 'Пройти тестирование'...")
-            start_button_selector = '#dijit_form_Button_0_label'
-            await page.wait_for_selector(start_button_selector)
-            await page.screenshot(path="before_start_test.png")
+            logger.info("🔄 Ищем кнопку 'Пройти тестирование'...")
+            await page.wait_for_timeout(2000)  # Даем странице полностью загрузиться
+            await page.screenshot(path="before_start_button.png")
             await self._send_info_screenshot(
-                "before_start_test.png",
-                "Найдена кнопка 'Пройти тестирование'"
+                "before_start_button.png",
+                "Ищем кнопку 'Пройти тестирование'"
             )
-            await page.click(start_button_selector)
+            
+            await page.click('#dijit_form_Button_0_label')
             await page.wait_for_load_state("networkidle")
             logger.info("✅ Кнопка 'Пройти тестирование' нажата")
-
+            
             # Шаг 2: Выбор специальности
-            logger.info("🔄 Поиск кнопки выбора специальности...")
-            specialty_selector = 'span:has-text("Фармация, 2025")'
-            await page.wait_for_selector(specialty_selector)
-            await page.screenshot(path="select_specialty.png")
+            logger.info("🔄 Выбираем специальность...")
+            await page.wait_for_timeout(2000)
+            await page.screenshot(path="specialty_selection.png")
             await self._send_info_screenshot(
-                "select_specialty.png",
-                "Выбираем специальность 'Фармация, 2025'"
+                "specialty_selection.png",
+                "Выбираем 'Фармация, 2025'"
             )
-            await page.click(specialty_selector)
+            
+            await page.click('span.extraSpace:has-text("Фармация, 2025")')
             await page.wait_for_load_state("networkidle")
             logger.info("✅ Специальность выбрана")
-
+            
             # Шаг 3: Переход к первому вопросу
-            logger.info("🔄 Поиск кнопки 'Перейти к первому вопросу'...")
-            start_question_selector = '#xsltforms-subform-0-label-2_2_6_4_2_'
-            await page.wait_for_selector(start_question_selector)
+            logger.info("🔄 Переходим к первому вопросу...")
+            await page.wait_for_timeout(2000)
             await page.screenshot(path="before_first_question.png")
             await self._send_info_screenshot(
                 "before_first_question.png",
-                "Начинаем тестирование"
+                "Переходим к тестированию"
             )
-            await page.click(start_question_selector)
+            
+            await page.click('#xsltforms-subform-0-label-2_2_6_4_2_')
             await page.wait_for_load_state("networkidle")
-            logger.info("✅ Переход к первому вопросу выполнен")
-
-            # Финальный скриншот перед началом теста
-            await page.screenshot(path="test_ready.png")
-            await self._send_info_screenshot(
-                "test_ready.png",
-                "✅ Тест готов к прохождению"
-            )
-
+            logger.info("✅ Тест начат")
+            
             return page
-
+            
         except Exception as e:
             error_path = "error_start_test.png"
             await page.screenshot(path=error_path)
