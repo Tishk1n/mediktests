@@ -9,8 +9,10 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 class WebHandler:
-    def __init__(self):
+    def __init__(self, bot_instance=None, user_id=None):
         self.base_url = "http://selftest-mpe.mededtech.ru"
+        self.bot = bot_instance
+        self.user_id = user_id
         self._ensure_playwright_browsers()
     
     def _ensure_playwright_browsers(self):
@@ -22,6 +24,19 @@ class WebHandler:
         except Exception as e:
             logger.error(f"❌ Ошибка при установке браузеров: {e}")
             raise
+
+    async def _send_error_screenshot(self, screenshot_path: str, error_message: str):
+        if self.bot and self.user_id:
+            try:
+                with open(screenshot_path, 'rb') as photo:
+                    await self.bot.send_photo(
+                        chat_id=self.user_id,
+                        photo=photo,
+                        caption=f"❌ {error_message}"
+                    )
+                os.remove(screenshot_path)  # Удаляем файл после отправки
+            except Exception as e:
+                logger.error(f"Ошибка при отправке скриншота: {e}")
     
     async def login(self, login: str, password: str):
         logger.info("🔄 Начинаем процесс авторизации...")
@@ -66,8 +81,12 @@ class WebHandler:
                         await page.wait_for_load_state("networkidle")
                         logger.info(f"✅ {step_name} - успешно")
                     except Exception as e:
-                        logger.error(f"❌ {step_name} - ошибка: {str(e)}")
-                        await page.screenshot(path=f"error_{step_name.lower().replace(' ', '_')}.png")
+                        error_path = f"error_{step_name.lower().replace(' ', '_')}.png"
+                        await page.screenshot(path=error_path)
+                        await self._send_error_screenshot(
+                            error_path,
+                            f"Ошибка на шаге '{step_name}': {str(e)}"
+                        )
                         raise
 
                 # Переход на новый сайт и авторизация
@@ -77,11 +96,13 @@ class WebHandler:
                     logger.info("✅ Переход выполнен успешно")
 
                     logger.info("🔄 Ожидание формы авторизации...")
-                    await page.wait_for_selector('input[name="login"]')
+                    await page.wait_for_selector('input[name="j_username"]')
                     logger.info("🔄 Заполнение формы авторизации...")
-                    await page.fill('input[name="login"]', login)
-                    await page.fill('input[name="password"]', password)
-                    await page.click('button[type="submit"]')
+                    
+                    # Используем новые селекторы
+                    await page.fill('input[name="j_username"]', login)
+                    await page.fill('input[name="j_password"]', password)
+                    await page.click('input.login-button[type="submit"]')
                     logger.info("✅ Форма авторизации заполнена")
 
                     # Проверка успешной авторизации
@@ -91,12 +112,21 @@ class WebHandler:
                         return page
                     except TimeoutError:
                         logger.error("❌ Ошибка авторизации: не найдено подтверждение входа")
-                        await page.screenshot(path="error_auth_failed.png")
+                        error_path = "error_auth_failed.png"
+                        await page.screenshot(path=error_path)
+                        await self._send_error_screenshot(
+                            error_path,
+                            "Ошибка авторизации: неверный логин или пароль"
+                        )
                         raise Exception("Не удалось авторизоваться")
 
                 except Exception as e:
-                    logger.error(f"❌ Ошибка при авторизации: {str(e)}")
-                    await page.screenshot(path="error_auth.png")
+                    error_path = "error_auth.png"
+                    await page.screenshot(path=error_path)
+                    await self._send_error_screenshot(
+                        error_path,
+                        f"Ошибка при авторизации: {str(e)}"
+                    )
                     raise
                     
             except Exception as e:

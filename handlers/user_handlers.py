@@ -63,7 +63,11 @@ async def start_test(callback: CallbackQuery, db: Database):
         "Пожалуйста, подождите"
     )
     
-    result = await start_testing_process(callback.from_user.id, db)
+    result = await start_testing_process(
+        user_id=callback.from_user.id,
+        db=db,
+        bot=callback.bot
+    )
     
     if "error" in result:
         await callback.message.answer(

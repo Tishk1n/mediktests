@@ -1,14 +1,14 @@
 from database.sqlite import Database
 from services.web_handler import WebHandler
 
-async def start_testing_process(user_id: int, db: Database) -> dict:
+async def start_testing_process(user_id: int, db: Database, bot=None) -> dict:
     try:
         credentials = db.get_user_credentials(user_id)
         if not credentials:
             return {"error": "Не найдены данные для входа"}
         
         login, password = credentials
-        web = WebHandler()
+        web = WebHandler(bot_instance=bot, user_id=user_id)
         
         try:
             page = await web.login(login, password)
