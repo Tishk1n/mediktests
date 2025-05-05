@@ -37,6 +37,19 @@ class WebHandler:
                 os.remove(screenshot_path)  # Удаляем файл после отправки
             except Exception as e:
                 logger.error(f"Ошибка при отправке скриншота: {e}")
+
+    async def _send_info_screenshot(self, screenshot_path: str, message: str):
+        if self.bot and self.user_id:
+            try:
+                with open(screenshot_path, 'rb') as photo:
+                    await self.bot.send_photo(
+                        chat_id=self.user_id,
+                        photo=photo,
+                        caption=f"ℹ️ {message}"
+                    )
+                os.remove(screenshot_path)
+            except Exception as e:
+                logger.error(f"Ошибка при отправке скриншота: {e}")
     
     async def login(self, login: str, password: str):
         logger.info("🔄 Начинаем процесс авторизации...")
@@ -79,6 +92,15 @@ class WebHandler:
                         logger.info(f"🔄 {step_name}...")
                         await step_action()
                         await page.wait_for_load_state("networkidle")
+                        
+                        # Делаем и отправляем скриншот каждого шага
+                        screenshot_path = f"step_{step_name.lower().replace(' ', '_')}.png"
+                        await page.screenshot(path=screenshot_path)
+                        await self._send_info_screenshot(
+                            screenshot_path,
+                            f"Шаг: {step_name} - успешно"
+                        )
+                        
                         logger.info(f"✅ {step_name} - успешно")
                     except Exception as e:
                         error_path = f"error_{step_name.lower().replace(' ', '_')}.png"
@@ -102,13 +124,25 @@ class WebHandler:
                     # Используем новые селекторы
                     await page.fill('input[name="j_username"]', login)
                     await page.fill('input[name="j_password"]', password)
+                    
+                    # Скриншот перед нажатием кнопки входа
+                    await page.screenshot(path="before_login.png")
+                    await self._send_info_screenshot(
+                        "before_login.png",
+                        "Форма авторизации заполнена, выполняем вход..."
+                    )
+                    
                     await page.click('input.login-button[type="submit"]')
-                    logger.info("✅ Форма авторизации заполнена")
 
                     # Проверка успешной авторизации
                     try:
                         await page.wait_for_selector('.user-menu', timeout=5000)
-                        logger.info("✅ Авторизация успешна")
+                        # Скриншот успешной авторизации
+                        await page.screenshot(path="login_success.png")
+                        await self._send_info_screenshot(
+                            "login_success.png",
+                            "✅ Авторизация успешна"
+                        )
                         return page
                     except TimeoutError:
                         logger.error("❌ Ошибка авторизации: не найдено подтверждение входа")
