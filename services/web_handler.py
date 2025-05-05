@@ -229,21 +229,24 @@ class WebHandler:
             logger.info("🔄 Ищем ответ на вопрос...")
             await page.goto(self.answers_url)
             await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)  # Ждем полной загрузки
             
-            # Ожидаем появления поля ввода
-            await page.wait_for_selector('input.zbz-input-clearable')
-            await page.fill('input.zbz-input-clearable', question_text)
+            # Очищаем поле ввода перед заполнением
+            search_input = await page.wait_for_selector('input.zbz-input-clearable')
+            await search_input.click()  # Фокусируемся на поле
+            await search_input.fill('')  # Очищаем поле
+            await search_input.type(question_text, delay=50)  # Вводим текст с задержкой
             
-            await page.screenshot(path="search_question.png")
+            await page.screenshot(path="search_input.png")
             await self._send_info_screenshot(
-                "search_question.png",
-                f"Ищем ответ на вопрос:\n{question_text[:100]}..."
+                "search_input.png",
+                f"Вводим вопрос для поиска:\n{question_text[:100]}..."
             )
             
             # Нажимаем кнопку поиска и ждем результатов
             await page.click('input[type="submit"][value*="Найти"]')
             await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(2000)  # Даем время на загрузку результатов
+            await page.wait_for_timeout(3000)  # Увеличиваем время ожидания результатов
             
             # Ищем правильный ответ (с жирным шрифтом)
             try:
@@ -382,10 +385,20 @@ class WebHandler:
                             correct_answers += 1
                             break
                 
-                # Возвращаемся к предыдущему вопросу
-                await page.click('#xsltforms-subform-4-label-2_2_2_2_2_10_4_2_')
+                # Возвращаемся к предыдущему вопросу используя новый XPath
+                try:
+                    back_button = await page.wait_for_selector('//*[@id="previous"]/span[1]/button')
+                    if back_button:
+                        await back_button.click()
+                        await page.wait_for_load_state("networkidle")
+                    else:
+                        logger.error("❌ Кнопка возврата не найдена")
+                        raise Exception("Кнопка возврата не найдена")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при возврате к предыдущему вопросу: {e}")
+                    raise
+
                 current_question -= 1
-                await page.wait_for_load_state("networkidle")
                 
                 # Проверяем, решен ли предыдущий вопрос
                 is_answered = await page.evaluate('''() => {
