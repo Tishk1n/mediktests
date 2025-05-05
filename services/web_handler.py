@@ -228,6 +228,10 @@ class WebHandler:
         try:
             logger.info("🔄 Ищем ответ на вопрос...")
             await page.goto(self.answers_url)
+            await page.wait_for_load_state("networkidle")
+            
+            # Ожидаем появления поля ввода
+            await page.wait_for_selector('input.zbz-input-clearable')
             await page.fill('input.zbz-input-clearable', question_text)
             
             await page.screenshot(path="search_question.png")
@@ -236,22 +240,50 @@ class WebHandler:
                 f"Ищем ответ на вопрос:\n{question_text[:100]}..."
             )
             
+            # Нажимаем кнопку поиска и ждем результатов
             await page.click('input[type="submit"][value*="Найти"]')
             await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)  # Даем время на загрузку результатов
             
             # Ищем правильный ответ (с жирным шрифтом)
-            answer = await page.evaluate('''() => {
-                const bold = document.querySelector('.b li[style*="font-weight:bold"]');
-                return bold ? bold.textContent : null;
-            }''')
-            
-            if answer:
-                logger.info(f"✅ Найден ответ: {answer}")
-                return answer
-            return None
+            try:
+                correct_answer = await page.evaluate('''() => {
+                    const answers = document.querySelectorAll('.b ul li');
+                    for (let answer of answers) {
+                        if (answer.getAttribute('style') && 
+                            answer.getAttribute('style').includes('font-weight:bold')) {
+                            return answer.textContent.trim();
+                        }
+                    }
+                    return null;
+                }''')
+                
+                if correct_answer:
+                    logger.info(f"✅ Найден правильный ответ: {correct_answer}")
+                    
+                    # Делаем скриншот найденного ответа
+                    await page.screenshot(path="found_answer.png")
+                    await self._send_info_screenshot(
+                        "found_answer.png",
+                        f"Правильный ответ:\n{correct_answer}"
+                    )
+                    
+                    return correct_answer
+                else:
+                    logger.error("❌ Правильный ответ не найден на странице")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"❌ Ошибка при поиске правильного ответа: {e}")
+                return None
             
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
+            await page.screenshot(path="error_search.png")
+            await self._send_error_screenshot(
+                "error_search.png",
+                f"Ошибка при поиске ответа: {str(e)}"
+            )
             return None
 
     async def process_test(self, page, test_url: str):
