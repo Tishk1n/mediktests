@@ -256,7 +256,6 @@ class WebHandler:
             
             # Находим все строки с вариантами ответов
             rows = await page.locator("table.question_options > tbody > tr").all()
-            
             if not rows:
                 logger.error("❌ Не найдены варианты ответов")
                 return None
@@ -265,55 +264,57 @@ class WebHandler:
             
             for row in rows:
                 try:
-                    # Находим радиокнопку в первой ячейке
-                    radio = row.locator("td:nth-child(1)").first
-                    
-                    # Получаем текст ответа из третьей ячейки и очищаем его
+                    # Получаем текст ответа из третьей ячейки
                     answer_text = await row.locator("td:nth-child(3)").inner_text()
                     if answer_text:
-                        # Очищаем текст от "Обоснование*" и лишних пробелов
                         clean_text = answer_text.split("Обоснование")[0].strip()
                         if clean_text:
-                            options_map[clean_text] = radio
+                            # Сохраняем всю строку tr для последующего поиска input
+                            options_map[clean_text] = row
                 except Exception as e:
                     logger.error(f"Ошибка при обработке строки: {e}")
                     continue
 
-            # Получаем правильный ответ и очищаем его
+            # Получаем и очищаем правильный ответ
             correct_answer = await self.parse_answer(question_text)
             if correct_answer:
                 clean_correct = correct_answer.split("Обоснование")[0].strip()
-                
-                # Используем нечеткое сравнение для поиска наиболее похожего варианта
                 closest_match = process.extractOne(clean_correct, options_map.keys())
                 
-                if closest_match and closest_match[1] >= 85:  # Порог схожести 85%
+                if closest_match and closest_match[1] >= 85:
                     await self.bot.send_message(
                         self.user_id,
                         f"Правильный ответ:\n{closest_match[0]}"
                     )
                     
-                    # Кликаем по родительскому элементу радиокнопки
-                    radio_element = options_map[closest_match[0]]
                     try:
-                        # Пытаемся найти и кликнуть по радиокнопке разными способами
-                        radio_button = radio_element.locator("input[type='radio']").first
-                        if await radio_button.count() > 0:
-                            await radio_button.click()
-                        else:
-                            # Альтернативный метод - клик через JavaScript
-                            await page.evaluate('''(radio) => {
-                                const input = radio.querySelector('input[type="radio"]');
-                                if (input) {
-                                    input.click();
-                                    input.checked = true;
-                                }
-                            }''', radio_element)
+                        # Получаем строку с правильным ответом
+                        correct_row = options_map[closest_match[0]]
                         
-                        return radio_element
+                        # Находим input type="radio" внутри первой ячейки
+                        radio_td = correct_row.locator("td").first
+                        try:
+                            # Пробуем найти input напрямую
+                            radio_input = radio_td.locator("input[type='radio']")
+                            if await radio_input.count() > 0:
+                                await radio_input.click()
+                                return correct_row
+                        except Exception:
+                            # Если не получилось, пробуем найти через div
+                            radio_div = radio_td.locator("div").first
+                            if radio_div:
+                                await radio_div.click()
+                                return correct_row
+                            
                     except Exception as e:
                         logger.error(f"Ошибка при клике по радиокнопке: {e}")
-                        return None
+                        # Последняя попытка - клик по первой ячейке
+                        try:
+                            await radio_td.click()
+                            return correct_row
+                        except Exception as last_e:
+                            logger.error(f"Последняя попытка клика не удалась: {last_e}")
+                            return None
             
             return None
             
