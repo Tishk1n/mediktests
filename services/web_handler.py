@@ -250,81 +250,43 @@ class WebHandler:
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
-    async def get_answer(self, page: Page, question_text: str) -> Locator | None:
+    async def get_answer(self, page: Page, question_text: str) -> tuple[str, str] | None:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
-            # Находим все строки с вариантами ответов
-            rows = await page.locator("table.question_options > tbody > tr").all()
-            if not rows:
-                logger.error("❌ Не найдены варианты ответов")
-                return None
+            # Находим все варианты ответов с их буквами
+            options = {}
+            letters = ['А', 'Б', 'В', 'Г']  # Буквы вариантов ответов
             
-            options_map = {}
-            
-            for row in rows:
+            for i, letter in enumerate(letters, 1):
                 try:
-                    # Получаем текст ответа из третьей ячейки
-                    answer_text = await row.locator("td:nth-child(3)").inner_text()
-                    if answer_text:
-                        clean_text = answer_text.split("Обоснование")[0].strip()
-                        if clean_text:
-                            # Сохраняем всю строку tr для последующего поиска input
-                            options_map[clean_text] = row
+                    # Получаем текст варианта ответа
+                    option_text = await page.locator(f"table.question_options > tbody > tr:nth-child({i}) td:nth-child(3)").inner_text()
+                    if option_text:
+                        clean_text = option_text.split("Обоснование")[0].strip()
+                        options[clean_text] = letter
                 except Exception as e:
-                    logger.error(f"Ошибка при обработке строки: {e}")
+                    logger.error(f"Ошибка при получении варианта {letter}: {e}")
                     continue
 
-            # Получаем и очищаем правильный ответ
+            # Получаем правильный ответ
             correct_answer = await self.parse_answer(question_text)
             if correct_answer:
                 clean_correct = correct_answer.split("Обоснование")[0].strip()
-                closest_match = process.extractOne(clean_correct, options_map.keys())
+                closest_match = process.extractOne(clean_correct, options.keys())
                 
                 if closest_match and closest_match[1] >= 85:
+                    letter = options[closest_match[0]]
                     await self.bot.send_message(
                         self.user_id,
-                        f"Правильный ответ:\n{closest_match[0]}"
+                        f"Правильный ответ:\n{closest_match[0]} ({letter})"
                     )
-                    
-                    try:
-                        # Получаем строку с правильным ответом
-                        correct_row = options_map[closest_match[0]]
-                        
-                        # Находим input type="radio" внутри первой ячейки
-                        radio_td = correct_row.locator("td").first
-                        try:
-                            # Пробуем найти input напрямую
-                            radio_input = radio_td.locator("input[type='radio']")
-                            if await radio_input.count() > 0:
-                                await radio_input.click()
-                                return correct_row
-                        except Exception:
-                            # Если не получилось, пробуем найти через div
-                            radio_div = radio_td.locator("div").first
-                            if radio_div:
-                                await radio_div.click()
-                                return correct_row
-                            
-                    except Exception as e:
-                        logger.error(f"Ошибка при клике по радиокнопке: {e}")
-                        # Последняя попытка - клик по первой ячейке
-                        try:
-                            await radio_td.click()
-                            return correct_row
-                        except Exception as last_e:
-                            logger.error(f"Последняя попытка клика не удалась: {last_e}")
-                            return None
+                    return letter, closest_match[0]
             
             return None
-            
+
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
-            await page.screenshot(path="error_get_answer.png")
-            await self._send_error_screenshot(
-                "error_get_answer.png",
-                f"Ошибка при поиске ответа: {str(e)}"
-            )
             return None
 
     async def process_test(self, page, test_url: str):
@@ -381,55 +343,31 @@ class WebHandler:
             while current_question > 0:
                 logger.info(f"🔄 Обработка вопроса {current_question}")
                 
-                # Получаем текст вопроса с новым XPath селектором
                 try:
                     question_element = await page.wait_for_selector('//*[@id="xsltforms-subform-0-output-14_4_2_"]/span/span/p')
                     question_text = await question_element.inner_text()
-                    if not question_text:
-                        logger.error("❌ Текст вопроса пуст")
-                        raise Exception("Не удалось получить текст вопроса")
                     
-                    logger.info(f"✅ Получен текст вопроса: {question_text[:100]}...")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка при получении текста вопроса: {e}")
-                    # Делаем скриншот для отладки
-                    await page.screenshot(path=f"error_question_{current_question}.png")
-                    await self._send_error_screenshot(
-                        f"error_question_{current_question}.png",
-                        f"Ошибка при получении текста вопроса {current_question}"
-                    )
-                    raise
-
-                await page.screenshot(path=f"question_{current_question}.png")
-                await self._send_info_screenshot(
-                    f"question_{current_question}.png",
-                    f"Вопрос {current_question}:\n{question_text[:100]}..."
-                )
-
-                # Получаем правильный ответ
-                correct_answer: Locator = await self.get_answer(page, question_text)
-                
-                if correct_answer:
-                    # Возвращаемся на страницу теста
-                    await page.goto(test_url)
+                    # Получаем букву правильного ответа
+                    result = await self.get_answer(page, question_text)
+                    
+                    if result:
+                        letter, answer_text = result
+                        # Находим и кликаем по нужному radiobox
+                        radio_selector = f"td.dijitReset:has-text('{letter}')"
+                        await page.click(radio_selector)
+                        correct_answers += 1
+                        
+                        logger.info(f"✅ Выбран ответ {letter}: {answer_text}")
+                    
+                    # Переходим к следующему вопросу
+                    await page.click("text=Далее")
                     await page.wait_for_load_state("networkidle")
+                    current_question -= 1
                     
-                    # Ищем и выбираем правильный вариант ответа
-                    await correct_answer.dispatch_event("click")
-                
-                # Возвращаемся к предыдущему вопросу
-                await page.click('#xsltforms-subform-4-label-2_2_2_2_2_10_4_2_')
-                current_question -= 1
-                await page.wait_for_load_state("networkidle")
-                
-                # Проверяем, решен ли предыдущий вопрос
-                is_answered = await page.evaluate('''() => {
-                    return document.querySelector('.fa-check-circle') !== null;
-                }''')
-                
-                if is_answered:
-                    logger.info("✅ Достигнут уже решенный вопрос")
-                    break
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке вопроса {current_question}: {e}")
+                    current_question -= 1
+                    continue
 
             return {
                 "correct": correct_answers,
