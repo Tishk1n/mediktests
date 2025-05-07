@@ -1,4 +1,5 @@
 import asyncio
+import re
 from urllib import parse
 
 from playwright.async_api import async_playwright, TimeoutError, Page, Browser
@@ -231,7 +232,12 @@ class WebHandler:
         if not self.answer_page:
             self.answer_page = await self.browser.new_page()
         
-        url = "https://www.tests-exam.ru/search.html?sea="+parse.quote(question_text.encode('cp1251'))
+        url = (
+                "https://www.tests-exam.ru/search.html?kat=428&sea="
+                + parse.quote(
+                    (' '.join(re.sub(r'[^\w\s]', '', question_text, flags=re.UNICODE).split()[-2:])).encode('cp1251')
+                )
+            )
         print(url)
         await self.answer_page.goto(url)
         # переход на страницу с ответом
