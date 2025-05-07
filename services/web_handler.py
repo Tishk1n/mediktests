@@ -1,10 +1,11 @@
 import asyncio
+from urllib import parse
+
 from playwright.async_api import async_playwright, TimeoutError, Page, Browser
 from aiogram.types import FSInputFile
 import os
 import subprocess
 import logging
-import urllib.parse
 
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -230,7 +231,7 @@ class WebHandler:
         if not self.answer_page:
             self.answer_page = await self.browser.new_page()
         
-        await self.answer_page.goto("https://www.tests-exam.ru/search.html?sea="+urllib.parse.quote_plus(question_text))
+        await self.answer_page.goto("https://www.tests-exam.ru/search.html?sea="+parse.quote(question_text.encode('cp1251')))
         # переход на страницу с ответом
         await self.answer_page.click('//div[@class="b"]/a[@href]')
         
