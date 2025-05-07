@@ -250,43 +250,40 @@ class WebHandler:
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
-    async def get_answer(self, page: Page, question_text: str) -> Locator | None:
+    async def get_answer(self, page: Page, question_text: str) -> int | None:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
-            # Находим все радиокнопки и их тексты
+            # Находим все варианты ответов и их порядковые номера
+            options = {}
             rows = await page.locator("table.question_options > tbody > tr").all()
-            options_map = {}
             
-            for row in rows:
+            for i, row in enumerate(rows, 1):
                 try:
-                    # Получаем текст ответа и радиокнопку
-                    text = await row.locator("td:nth-child(3)").inner_text()
-                    radio = await row.locator("td:nth-child(1)").first
-                    
-                    if text:
-                        clean_text = text.split("Обоснование")[0].strip()
-                        if clean_text:
-                            options_map[clean_text] = radio
+                    option_text = await row.locator("td:nth-child(3)").inner_text()
+                    if option_text:
+                        clean_text = option_text.split("Обоснование")[0].strip()
+                        options[clean_text] = i  # Сохраняем порядковый номер варианта
                 except Exception as e:
-                    logger.error(f"Ошибка при обработке строки: {e}")
+                    logger.error(f"Ошибка при получении варианта {i}: {e}")
                     continue
 
             # Получаем правильный ответ
             correct_answer = await self.parse_answer(question_text)
             if correct_answer:
                 clean_correct = correct_answer.split("Обоснование")[0].strip()
-                closest_match = process.extractOne(clean_correct, options_map.keys())
+                closest_match = process.extractOne(clean_correct, options.keys())
                 
                 if closest_match and closest_match[1] >= 85:
+                    answer_index = options[closest_match[0]]
                     await self.bot.send_message(
                         self.user_id,
                         f"Правильный ответ:\n{closest_match[0]}"
                     )
-                    return options_map[closest_match[0]]
+                    return answer_index
             
             return None
-            
+
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
             return None
@@ -340,60 +337,63 @@ class WebHandler:
             
             # Остальная логика обработки теста
             correct_answers = 0
-            total_questions = 0
+            current_question = 80
 
-            while True:
+            while current_question > 0:
+                logger.info(f"🔄 Обработка вопроса {current_question}")
+                
                 try:
+                    # Ждем загрузки вопроса
                     await page.wait_for_load_state("networkidle")
                     await page.wait_for_timeout(2000)
                     
-                    # Проверяем, есть ли уже ответ на этот вопрос
-                    is_answered = await page.evaluate('''() => {
-                        return document.querySelector('.fa-check-circle') !== null;
-                    }''')
-                    
-                    if is_answered:
-                        logger.info("✅ Вопрос уже отвечен, завершаем")
-                        break
-                    
                     question_element = await page.wait_for_selector('//*[@id="xsltforms-subform-0-output-14_4_2_"]/span/span/p')
                     question_text = await question_element.inner_text()
-                    total_questions += 1
                     
-                    # Получаем элемент с правильным ответом
-                    radio_cell = await self.get_answer(page, question_text)
+                    # Получаем индекс правильного ответа
+                    answer_index = await self.get_answer(page, question_text)
                     
-                    if radio_cell:
+                    if answer_index:
                         try:
-                            # Находим и кликаем по радиокнопке внутри ячейки
-                            await radio_cell.click()
-                            await page.wait_for_timeout(1000)
+                            # Находим и кликаем по нужному радиобоксу
+                            selector = f"table.question_options > tbody > tr:nth-child({answer_index}) td:first-child input[type='radio']"
+                            await page.wait_for_selector(selector)
+                            await page.click(selector)
                             correct_answers += 1
-                            logger.info(f"✅ Выбран ответ для вопроса {total_questions}")
+                            logger.info(f"✅ Выбран ответ {answer_index}")
                             
-                            # Переходим к следующему вопросу
-                            next_button = await page.query_selector('button:has-text("Далее")')
+                            # Ждем применения ответа
+                            await page.wait_for_timeout(1000)
+                            
+                            # Проверяем, есть ли кнопка "Далее"
+                            next_button = await page.query_selector("button:has-text('Далее')")
                             if next_button:
                                 await next_button.click()
-                                await page.wait_for_timeout(1000)
                             else:
-                                logger.info("Достигнут конец теста")
+                                # Если нет кнопки "Далее", значит мы дошли до конца или до решенного вопроса
                                 break
                                 
                         except Exception as click_error:
-                            logger.error(f"Ошибка при клике: {click_error}")
+                            logger.error(f"Ошибка при выборе ответа: {click_error}")
                             break
                     
+                    current_question -= 1
+                    
                 except Exception as e:
-                    logger.error(f"Ошибка при обработке вопроса: {e}")
+                    logger.error(f"Ошибка при обработке вопроса {current_question}: {e}")
                     break
 
             return {
                 "correct": correct_answers,
-                "total": total_questions,
-                "percentage": round((correct_answers / total_questions) * 100, 2) if total_questions > 0 else 0
+                "total": 80 - current_question,
+                "percentage": round((correct_answers / (80 - current_question)) * 100, 2)
             }
 
         except Exception as e:
-            logger.error(f"❌ Ошибка при выполнении теста: {e}")
+            error_path = "error_processing_test.png"
+            await page.screenshot(path=error_path)
+            await self._send_error_screenshot(
+                error_path,
+                f"❌ Ошибка при выполнении теста: {str(e)}"
+            )
             raise
