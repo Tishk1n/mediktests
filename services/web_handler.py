@@ -232,7 +232,7 @@ class WebHandler:
         
         await self.answer_page.goto("https://www.tests-exam.ru/search.html?sea="+urllib.parse.quote_plus(question_text))
         # переход на страницу с ответом
-        await self.answer_page.click("//div[@class="b"]/a[@href]")
+        await self.answer_page.click('//div[@class="b"]/a[@href]')
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
