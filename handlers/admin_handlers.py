@@ -7,6 +7,7 @@ from aiogram.utils.markdown import hbold
 from database.sqlite import Database
 from keyboards.reply import get_admin_keyboard, get_requisites_keyboard
 from utils.subscription import format_subscription_type
+from logging import logger
 
 router = Router()
 

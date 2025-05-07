@@ -254,56 +254,47 @@ class WebHandler:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
-            # Получаем все варианты ответов с улучшенной очисткой текста
-            options = await page.locator(".question_options>tbody>tr").all()
+            # Находим все строки с вариантами ответов
+            rows = await page.locator("table.question_options > tbody > tr").all()
             
-            if not options:
+            if not rows:
                 logger.error("❌ Не найдены варианты ответов")
                 return None
             
-            # Удаляем дубликаты ответов
-            options_cleaned = {}
+            options_map = {}
             
-            for i, option in enumerate(options, start=1):
-                # 1st td > 2nd div > 1st div > 1st div
-                handle = option.locator(
-                    #"td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1)"
-                    "td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > span > span > a > span > i"
-                ).first
+            for row in rows:
+                # Получаем текст ответа
+                answer_text = await row.locator("td:nth-child(3)").text_content()
+                # Находим соответствующий radiobutton в первой колонке
+                radio = row.locator("td:nth-child(1) input[type='radio']").first
                 
-                print(handle)
-                
-                # 3rd td > 1st span > 1st span > 1st span > p
-                text_loc = option.locator(
-                    "td:nth-child(3) > span:nth-child(1) > span:nth-child(1) > span:nth-child(1) > p"
-                ).first
-                
-                rel_radiobutton = text_loc.locator('xpath=../../../../../td[1]/div[1]/div[1]/div[1]/span[1]/span[1]/a[1]/span[1]/i[1]')
-                text = await text_loc.text_content()
-                
-                print(f"Вариант {i}:")
-                options_cleaned[text] = rel_radiobutton
-                print(text)
-                print("-" * 40)
+                if answer_text and radio:
+                    answer_text = answer_text.strip()
+                    options_map[answer_text] = radio
             
             await page.screenshot(path="question_options.png")
             await self._send_info_screenshot(
                 "question_options.png",
-                f"Вопрос: {question_text}\n\nВарианты ответов:\n" + "\n".join(options_cleaned.keys())
+                f"Вопрос: {question_text}\n\nВарианты ответов:\n" + "\n".join(options_map.keys())
             )
             
+            # Получаем правильный ответ
             correct_answer = await self.parse_answer(question_text)
-            correct_answer_verified = process.extractOne(correct_answer, options_cleaned.keys())
             
             if correct_answer:
-                await self.bot.send_message(
-                    self.user_id,
-                    f"Правильный ответ:\n{correct_answer_verified[0]}"
-                )
-                return options_cleaned[correct_answer_verified[0]]
+                # Используем нечеткое сравнение для поиска наиболее похожего варианта
+                closest_match = process.extractOne(correct_answer.strip(), options_map.keys())
+                
+                if closest_match and closest_match[1] >= 85:  # Порог схожести 85%
+                    await self.bot.send_message(
+                        self.user_id,
+                        f"Правильный ответ:\n{closest_match[0]}"
+                    )
+                    return options_map[closest_match[0]]
             
             return None
-        
+            
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
             await page.screenshot(path="error_get_answer.png")

@@ -24,20 +24,12 @@ async def cmd_start(message: Message, state: FSMContext, db: Database):
     config = load_config()
     is_admin = message.from_user.id in config.tg_bot.admin_ids
     
-    if is_admin:
-        await message.answer(
-            "👋 Добро пожаловать в панель администратора!\n"
-            "Выберите действие:",
-            reply_markup=get_admin_keyboard()
-        )
-        return
-
-    # Получаем информацию о подписке
+    # Получаем информацию о подписке и учетных данных для всех пользователей
     subscription = db.get_subscription_details(message.from_user.id)
     credentials = db.get_user_credentials(message.from_user.id)
     
-    if not subscription["active"]:
-        # Даем демо-доступ на 30 минут
+    if not subscription["active"] and not is_admin:
+        # Даем демо-доступ только обычным пользователям
         db.add_subscription(message.from_user.id, 0.0208333, "demo")
         subscription = db.get_subscription_details(message.from_user.id)
     
@@ -53,23 +45,31 @@ async def cmd_start(message: Message, state: FSMContext, db: Database):
     else:
         time_str = "истекла"
 
-    # Формируем сообщение
-    message_text = (
-        f"👋 Приветствую, {message.from_user.first_name}!\n\n"
-        f"💫 Ваша подписка:\n"
-        f"Тип: {format_subscription_type(subscription['type']) if subscription['type'] else 'Отсутствует'}\n"
-        f"Истекает через: {time_str}\n"
-        f"Данные от FMZA: {'✅' if credentials else '❌'}\n"
-    )
+    # Формируем сообщение в зависимости от типа пользователя
+    if is_admin:
+        message_text = (
+            f"👋 Добро пожаловать в панель администратора!\n\n"
+            f"Данные от FMZA: {'✅' if credentials else '❌'}"
+        )
+    else:
+        message_text = (
+            f"👋 Приветствую, {message.from_user.first_name}!\n\n"
+            f"💫 Ваша подписка:\n"
+            f"Тип: {format_subscription_type(subscription['type']) if subscription['type'] else 'Отсутствует'}\n"
+            f"Истекает через: {time_str}\n"
+            f"Данные от FMZA: {'✅' if credentials else '❌'}\n"
+        )
     
+    # Если нет учетных данных, добавляем предупреждение
     if not credentials:
         message_text += "\n⚠️ Для начала работы необходимо сохранить данные вашего аккаунта."
     
     await message.answer(
         message_text,
-        reply_markup=get_main_keyboard()
+        reply_markup=get_admin_keyboard() if is_admin else get_main_keyboard()
     )
     
+    # Запрашиваем учетные данные у всех пользователей, если они не установлены
     if not credentials:
         await message.answer(
             "Введите ваш логин от сайта selftest-mpe.medtech.ru:"
