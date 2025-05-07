@@ -3,4 +3,3 @@ playwright>=1.40
 python-dotenv
 environs
 aiosqlite
-aiohttp>=3.8.0
