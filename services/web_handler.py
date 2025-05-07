@@ -291,18 +291,59 @@ class WebHandler:
 
     async def process_test(self, page, test_url: str):
         try:
+            logger.info("🔄 Переходим по ссылке на тест...")
             await page.goto(test_url)
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)  # Даем странице полностью загрузиться
+            
+            await page.screenshot(path="before_list.png")
+            await self._send_info_screenshot(
+                "before_list.png",
+                "Переходим к списку вопросов..."
+            )
+            
+            # Нажимаем кнопку "К списку вопросов" с новым селектором
+            try:
+                list_button = await page.wait_for_selector(
+                    'button span#xsltforms-subform-0-label-2_2_2_6_2_10_4_2_',
+                    timeout=10000
+                )
+                if list_button:
+                    await list_button.click()
+                else:
+                    logger.error("❌ Кнопка 'К списку вопросов' не найдена")
+                    raise Exception("Кнопка списка вопросов не найдена")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при поиске кнопки списка: {e}")
+                # Пробуем альтернативный способ
+                try:
+                    await page.evaluate('''() => {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const listButton = buttons.find(b => b.textContent.includes('К списку вопросов'));
+                        if (listButton) listButton.click();
+                    }''')
+                except Exception as e2:
+                    logger.error(f"❌ Альтернативный метод также не сработал: {e2}")
+                    raise
+            
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(2000)
             
+            await page.screenshot(path="questions_list.png")
+            await self._send_info_screenshot(
+                "questions_list.png",
+                "Список вопросов открыт"
+            )
+            
+            # Остальная логика обработки теста
             correct_answers = 0
             current_question = 80
 
             while current_question > 0:
+                logger.info(f"🔄 Обработка вопроса {current_question}")
+                
                 try:
-                    logger.info(f"🔄 Обработка вопроса {current_question}")
-                    
-                    # Получаем текст вопроса
                     question_element = await page.wait_for_selector('//*[@id="xsltforms-subform-0-output-14_4_2_"]/span/span/p')
                     question_text = await question_element.inner_text()
                     
@@ -311,55 +352,20 @@ class WebHandler:
                     
                     if result:
                         letter, answer_text = result
-                        try:
-                            # Находим нужную радиокнопку по букве варианта ответа
-                            answer_row = await page.wait_for_selector(
-                                f'//table[@class="question_options"]//tr[.//td[contains(text(), "{letter}")]]',
-                                timeout=5000
-                            )
-                            
-                            if answer_row:
-                                # Находим радиокнопку в первой ячейке найденной строки
-                                radio_button = await answer_row.query_selector('td:first-child i.fa-circle-o')
-                                if radio_button:
-                                    # Кликаем по радиокнопке
-                                    await radio_button.click()
-                                    correct_answers += 1
-                                    logger.info(f"✅ Выбран ответ {letter}: {answer_text}")
-                                    await page.wait_for_timeout(500)  # Ждем обработки клика
-                                else:
-                                    logger.error("Радиокнопка не найдена в строке")
-                            else:
-                                logger.error(f"Строка с ответом '{letter}' не найдена")
-                                
-                        except Exception as click_error:
-                            logger.error(f"Ошибка при клике: {click_error}")
+                        # Находим и кликаем по нужному radiobox
+                        radio_selector = f"td.dijitReset:has-text('{letter}')"
+                        await page.click(radio_selector)
+                        correct_answers += 1
+                        
+                        logger.info(f"✅ Выбран ответ {letter}: {answer_text}")
                     
-                    # Переход к следующему вопросу через кнопку "Далее"
-                    next_button = await page.wait_for_selector(
-                        'button:has-text("Далее")',
-                        timeout=5000
-                    )
-                    if next_button:
-                        await next_button.click()
-                        await page.wait_for_load_state("networkidle")
-                        await page.wait_for_timeout(1000)
-                    
-                    # Проверяем, не достигли ли мы решенного вопроса
-                    checked_icon = await page.query_selector('.fa-check-circle')
-                    if checked_icon:
-                        logger.info("✅ Достигнут уже решенный вопрос")
-                        break
-                    
+                    # Переходим к следующему вопросу
+                    await page.click("text=Далее")
+                    await page.wait_for_load_state("networkidle")
                     current_question -= 1
                     
                 except Exception as e:
                     logger.error(f"Ошибка при обработке вопроса {current_question}: {e}")
-                    await page.screenshot(path=f"error_question_{current_question}.png")
-                    await self._send_error_screenshot(
-                        f"error_question_{current_question}.png",
-                        f"Ошибка на вопросе {current_question}: {str(e)}"
-                    )
                     current_question -= 1
                     continue
 
@@ -370,10 +376,10 @@ class WebHandler:
             }
 
         except Exception as e:
-            logger.error(f"❌ Ошибка при выполнении теста: {e}")
-            await page.screenshot(path="error_processing_test.png")
+            error_path = "error_processing_test.png"
+            await page.screenshot(path=error_path)
             await self._send_error_screenshot(
-                "error_processing_test.png",
+                error_path,
                 f"❌ Ошибка при выполнении теста: {str(e)}"
             )
             raise
