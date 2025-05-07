@@ -264,34 +264,56 @@ class WebHandler:
             options_map = {}
             
             for row in rows:
-                # Получаем текст ответа
-                answer_text = await row.locator("td:nth-child(3)").text_content()
-                # Находим соответствующий radiobutton в первой колонке
-                radio = row.locator("td:nth-child(1) input[type='radio']").first
-                
-                if answer_text and radio:
-                    answer_text = answer_text.strip()
-                    options_map[answer_text] = radio
-            
-            await page.screenshot(path="question_options.png")
-            await self._send_info_screenshot(
-                "question_options.png",
-                f"Вопрос: {question_text}\n\nВарианты ответов:\n" + "\n".join(options_map.keys())
-            )
-            
-            # Получаем правильный ответ
+                try:
+                    # Находим радиокнопку в первой ячейке
+                    radio = row.locator("td:nth-child(1)").first
+                    
+                    # Получаем текст ответа из третьей ячейки и очищаем его
+                    answer_text = await row.locator("td:nth-child(3)").inner_text()
+                    if answer_text:
+                        # Очищаем текст от "Обоснование*" и лишних пробелов
+                        clean_text = answer_text.split("Обоснование")[0].strip()
+                        if clean_text:
+                            options_map[clean_text] = radio
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке строки: {e}")
+                    continue
+
+            # Получаем правильный ответ и очищаем его
             correct_answer = await self.parse_answer(question_text)
-            
             if correct_answer:
+                clean_correct = correct_answer.split("Обоснование")[0].strip()
+                
                 # Используем нечеткое сравнение для поиска наиболее похожего варианта
-                closest_match = process.extractOne(correct_answer.strip(), options_map.keys())
+                closest_match = process.extractOne(clean_correct, options_map.keys())
                 
                 if closest_match and closest_match[1] >= 85:  # Порог схожести 85%
                     await self.bot.send_message(
                         self.user_id,
                         f"Правильный ответ:\n{closest_match[0]}"
                     )
-                    return options_map[closest_match[0]]
+                    
+                    # Кликаем по родительскому элементу радиокнопки
+                    radio_element = options_map[closest_match[0]]
+                    try:
+                        # Пытаемся найти и кликнуть по радиокнопке разными способами
+                        radio_button = radio_element.locator("input[type='radio']").first
+                        if await radio_button.count() > 0:
+                            await radio_button.click()
+                        else:
+                            # Альтернативный метод - клик через JavaScript
+                            await page.evaluate('''(radio) => {
+                                const input = radio.querySelector('input[type="radio"]');
+                                if (input) {
+                                    input.click();
+                                    input.checked = true;
+                                }
+                            }''', radio_element)
+                        
+                        return radio_element
+                    except Exception as e:
+                        logger.error(f"Ошибка при клике по радиокнопке: {e}")
+                        return None
             
             return None
             
