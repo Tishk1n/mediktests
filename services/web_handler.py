@@ -1,12 +1,17 @@
 import asyncio
 import re
+import os
+import logging
+import subprocess
+
 from urllib import parse
 
-from playwright.async_api import async_playwright, TimeoutError, Page, Browser, Locator
+from fuzzywuzzy import process
+
 from aiogram.types import FSInputFile
-import os
-import subprocess
-import logging
+
+from playwright.async_api import async_playwright, TimeoutError, Page, Browser, Locator
+
 
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -280,16 +285,14 @@ class WebHandler:
             )
             
             correct_answer = await self.parse_answer(question_text)
-            print(correct_answer)
-            print(options_cleaned.keys())
-            print(correct_answer in options_cleaned.keys())
+            correct_answer_verified = process.extractOne(correct_answer, options_cleaned.keys())
             
             if correct_answer:
                 await self.bot.send_message(
                     self.user_id,
                     f"Правильный ответ:\n{correct_answer}"
                 )
-                return options_cleaned[correct_answer]
+                return options_cleaned[correct_answer_verified]
             
             return None
         

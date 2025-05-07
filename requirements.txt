@@ -3,3 +3,6 @@ playwright>=1.40
 python-dotenv
 environs
 aiosqlite
+
+fuzzywuzzy
+python-Levenshtein
