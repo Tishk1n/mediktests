@@ -235,7 +235,7 @@ class WebHandler:
         url = (
                 "https://www.tests-exam.ru/search.html?kat=428&sea="
                 + parse.quote(
-                    (' '.join(re.sub(r'[^\w\s]', '', question_text, flags=re.UNICODE).split()[-2:])).encode('cp1251')
+                    (' '.join(re.sub(r'[^\w\s]', '', question_text, flags=re.UNICODE).split()[:-2])).encode('cp1251')
                 )
             )
         print(url)
