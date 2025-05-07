@@ -5,6 +5,7 @@ import os
 import subprocess
 import logging
 import re
+import aiohttp
 
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,6 +19,7 @@ class WebHandler:
         self.browser = None
         self.context = None
         self.answers_url = "https://www.tests-exam.ru/vopros.html?id_test=719&id_vopros=25565"
+        self.chatgpt_api_url = "https://free.churchless.tech/v1/chat/completions"
         self._ensure_playwright_browsers()
 
     def _ensure_playwright_browsers(self):
@@ -76,6 +78,38 @@ class WebHandler:
             except Exception as e:
                 logger.error(f"Ошибка при отправке скриншота: {e}")
     
+    async def _ask_chatgpt(self, question: str, answers: list) -> str:
+        try:
+            prompt = f"Вопрос - {question}\nВарианты ответа - {', '.join(answers)}\nПришли только правильный вариант ответа."
+            
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7
+            }
+            
+            logger.info(f"🔄 Отправляем запрос в ChatGPT:\n{prompt}")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.chatgpt_api_url, json=data, headers=headers) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        answer = result['choices'][0]['message']['content'].strip()
+                        logger.info(f"✅ Получен ответ от ChatGPT: {answer}")
+                        return answer
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Ошибка API ChatGPT: {error_text}")
+                        return None
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка при запросе к ChatGPT: {e}")
+            return None
+
     async def login(self, login: str, password: str):
         logger.info("🔄 Начинаем процесс авторизации...")
         
@@ -226,62 +260,43 @@ class WebHandler:
 
     async def get_answer(self, page, question_text: str) -> str:
         try:
-            logger.info("🔄 Ищем ответ на вопрос...")
-            await page.goto(self.answers_url)
-            await page.wait_for_load_state("networkidle")
+            logger.info("🔄 Получаем варианты ответов...")
             
-            # Ожидаем появления поля ввода
-            await page.wait_for_selector('input.zbz-input-clearable')
-            await page.fill('input.zbz-input-clearable', question_text)
+            # Получаем все варианты ответов
+            answers = await page.evaluate('''() => {
+                const options = Array.from(document.querySelectorAll('.testRadioButton')).map(el => {
+                    return el.closest('tr').textContent.trim();
+                });
+                return options;
+            }''')
             
-            await page.screenshot(path="search_question.png")
+            if not answers:
+                logger.error("❌ Не найдены варианты ответов")
+                return None
+                
+            await page.screenshot(path="question_options.png")
             await self._send_info_screenshot(
-                "search_question.png",
-                f"Ищем ответ на вопрос:\n{question_text[:100]}..."
+                "question_options.png",
+                f"Вопрос: {question_text}\n\nВарианты ответов:\n" + "\n".join(answers)
             )
             
-            # Нажимаем кнопку поиска и ждем результатов
-            await page.click('input[type="submit"][value*="Найти"]')
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(2000)  # Даем время на загрузку результатов
+            # Получаем ответ от ChatGPT
+            correct_answer = await self._ask_chatgpt(question_text, answers)
             
-            # Ищем правильный ответ (с жирным шрифтом)
-            try:
-                correct_answer = await page.evaluate('''() => {
-                    const answers = document.querySelectorAll('.b ul li');
-                    for (let answer of answers) {
-                        if (answer.getAttribute('style') && 
-                            answer.getAttribute('style').includes('font-weight:bold')) {
-                            return answer.textContent.trim();
-                        }
-                    }
-                    return null;
-                }''')
-                
-                if correct_answer:
-                    logger.info(f"✅ Найден правильный ответ: {correct_answer}")
-                    
-                    # Делаем скриншот найденного ответа
-                    await page.screenshot(path="found_answer.png")
-                    await self._send_info_screenshot(
-                        "found_answer.png",
-                        f"Правильный ответ:\n{correct_answer}"
-                    )
-                    
-                    return correct_answer
-                else:
-                    logger.error("❌ Правильный ответ не найден на странице")
-                    return None
-                    
-            except Exception as e:
-                logger.error(f"❌ Ошибка при поиске правильного ответа: {e}")
-                return None
+            if correct_answer:
+                await self.bot.send_message(
+                    self.user_id,
+                    f"🤖 ChatGPT предполагает, что правильный ответ:\n{correct_answer}"
+                )
+                return correct_answer
+            
+            return None
             
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
-            await page.screenshot(path="error_search.png")
+            await page.screenshot(path="error_get_answer.png")
             await self._send_error_screenshot(
-                "error_search.png",
+                "error_get_answer.png",
                 f"Ошибка при поиске ответа: {str(e)}"
             )
             return None
