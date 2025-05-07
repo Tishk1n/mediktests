@@ -292,7 +292,7 @@ class WebHandler:
                     self.user_id,
                     f"Правильный ответ:\n{correct_answer}"
                 )
-                return options_cleaned[correct_answer_verified]
+                return options_cleaned[correct_answer_verified[0]]
             
             return None
         
