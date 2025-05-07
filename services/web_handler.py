@@ -2,7 +2,7 @@ import asyncio
 import re
 from urllib import parse
 
-from playwright.async_api import async_playwright, TimeoutError, Page, Browser
+from playwright.async_api import async_playwright, TimeoutError, Page, Browser, Locator
 from aiogram.types import FSInputFile
 import os
 import subprocess
@@ -245,7 +245,7 @@ class WebHandler:
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
-    async def get_answer(self, page: Page, question_text: str) -> str | None:
+    async def get_answer(self, page: Page, question_text: str) -> Locator | None:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
@@ -287,7 +287,7 @@ class WebHandler:
                     self.user_id,
                     f"Правильный ответ:\n{correct_answer}"
                 )
-                return correct_answer
+                return options_cleaned[correct_answer]
             
             return None
         
@@ -380,7 +380,7 @@ class WebHandler:
                 )
 
                 # Получаем правильный ответ
-                correct_answer = await self.get_answer(page, question_text)
+                correct_answer: Locator = await self.get_answer(page, question_text)
                 
                 if correct_answer:
                     # Возвращаемся на страницу теста
@@ -388,13 +388,7 @@ class WebHandler:
                     await page.wait_for_load_state("networkidle")
                     
                     # Ищем и выбираем правильный вариант ответа
-                    answers = await page.query_selector_all('.testRadioButton')
-                    for answer in answers:
-                        answer_text = await answer.evaluate('el => el.closest("tr").textContent')
-                        if correct_answer in answer_text:
-                            await answer.click()
-                            correct_answers += 1
-                            break
+                    await correct_answer.click()
                 
                 # Возвращаемся к предыдущему вопросу
                 await page.click('#xsltforms-subform-4-label-2_2_2_2_2_10_4_2_')
