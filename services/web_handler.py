@@ -250,25 +250,27 @@ class WebHandler:
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
-    async def get_answer(self, page: Page, question_text: str) -> Locator | None:
+    async def get_answer(self, page: Page, question_text: str) -> tuple[str, Locator] | None:
         try:
             logger.info("🔄 Получаем варианты ответов...")
-            
-            # Находим все строки с вариантами ответов
-            rows = await page.locator("table.question_options > tbody > tr").all()
             options_map = {}
             
-            for i, row in enumerate(rows, 1):
+            # Находим все радиокнопки и их тексты
+            for letter in ['А', 'Б', 'В', 'Г']:
                 try:
-                    # Получаем текст ответа
-                    answer_text = await row.locator("td:nth-child(3)").inner_text()
-                    if answer_text:
-                        clean_text = answer_text.split("Обоснование")[0].strip()
-                        if clean_text:
-                            # Сохраняем саму строку
-                            options_map[clean_text] = row
+                    # Находим ячейку с буквой
+                    row = await page.locator(f"tr:has-text('{letter}')").first
+                    if row:
+                        # Получаем текст ответа из третьей ячейки
+                        answer_text = await row.locator("td:nth-child(3)").inner_text()
+                        if answer_text:
+                            clean_text = answer_text.split("Обоснование")[0].strip()
+                            if clean_text:
+                                # Сохраняем букву и локатор радиокнопки
+                                radio = await row.locator("td:first-child input[type='radio']").first
+                                options_map[clean_text] = (letter, radio)
                 except Exception as e:
-                    logger.error(f"Ошибка при получении варианта {i}: {e}")
+                    logger.error(f"Ошибка при получении варианта {letter}: {e}")
                     continue
 
             # Получаем правильный ответ
@@ -278,14 +280,15 @@ class WebHandler:
                 closest_match = process.extractOne(clean_correct, options_map.keys())
                 
                 if closest_match and closest_match[1] >= 85:
+                    letter, radio = options_map[closest_match[0]]
                     await self.bot.send_message(
                         self.user_id,
-                        f"Правильный ответ:\n{closest_match[0]}"
+                        f"Правильный ответ:\n{closest_match[0]} (вариант {letter})"
                     )
-                    return options_map[closest_match[0]]
+                    return letter, radio
             
             return None
-
+            
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
             return None
@@ -357,31 +360,40 @@ class WebHandler:
                     question_text = await question_element.inner_text()
                     total_questions += 1
                     
-                    # Получаем строку с правильным ответом
-                    correct_row = await self.get_answer(page, question_text)
+                    # Получаем букву правильного ответа и радиокнопку
+                    result = await self.get_answer(page, question_text)
                     
-                    if correct_row:
+                    if result:
+                        letter, radio = result
                         try:
-                            # Находим span с радиокнопкой внутри первой ячейки
-                            radio_span = await correct_row.locator("td:first-child span.radio").first
-                            if radio_span:
-                                await radio_span.click(force=True)
+                            # Кликаем по радиокнопке
+                            await radio.click(force=True)
+                            await page.wait_for_timeout(1000)
+                            correct_answers += 1
+                            logger.info(f"✅ Выбран вариант {letter}")
+                            
+                            # Переходим к следующему вопросу
+                            next_button = await page.query_selector("button:has-text('Далее')")
+                            if next_button:
+                                await next_button.click(force=True)
                                 await page.wait_for_timeout(1000)
-                                correct_answers += 1
-                                logger.info(f"✅ Ответ выбран для вопроса {total_questions}")
+                            else:
+                                logger.info("Достигнут конец теста")
+                                break
                                 
-                                # Проверяем наличие кнопки "Далее"
-                                next_button = await page.query_selector("button:has-text('Далее')")
-                                if next_button:
-                                    await next_button.click(force=True)
-                                    await page.wait_for_timeout(1000)
-                                else:
-                                    logger.info("Достигнут конец теста")
-                                    break
-                                    
                         except Exception as click_error:
                             logger.error(f"Ошибка при клике: {click_error}")
-                            break
+                            # Пробуем альтернативный способ клика
+                            try:
+                                await page.evaluate('''(selector) => {
+                                    const radio = document.querySelector(selector);
+                                    if (radio) radio.click();
+                                }''', f"tr:has-text('{letter}') td:first-child input[type='radio']")
+                                await page.wait_for_timeout(1000)
+                                correct_answers += 1
+                            except Exception as e:
+                                logger.error(f"Альтернативный клик не удался: {e}")
+                                break
                     
                 except Exception as e:
                     logger.error(f"Ошибка при обработке вопроса: {e}")
