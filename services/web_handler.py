@@ -250,23 +250,22 @@ class WebHandler:
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
-    async def get_answer(self, page: Page, question_text: str) -> tuple[str, str] | None:
+    async def get_answer(self, page: Page, question_text: str) -> int | None:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
-            # Находим все варианты ответов с их буквами
+            # Находим все варианты ответов и их порядковые номера
             options = {}
-            letters = ['А', 'Б', 'В', 'Г']  # Буквы вариантов ответов
+            rows = await page.locator("table.question_options > tbody > tr").all()
             
-            for i, letter in enumerate(letters, 1):
+            for i, row in enumerate(rows, 1):
                 try:
-                    # Получаем текст варианта ответа
-                    option_text = await page.locator(f"table.question_options > tbody > tr:nth-child({i}) td:nth-child(3)").inner_text()
+                    option_text = await row.locator("td:nth-child(3)").inner_text()
                     if option_text:
                         clean_text = option_text.split("Обоснование")[0].strip()
-                        options[clean_text] = letter
+                        options[clean_text] = i  # Сохраняем порядковый номер варианта
                 except Exception as e:
-                    logger.error(f"Ошибка при получении варианта {letter}: {e}")
+                    logger.error(f"Ошибка при получении варианта {i}: {e}")
                     continue
 
             # Получаем правильный ответ
@@ -276,12 +275,12 @@ class WebHandler:
                 closest_match = process.extractOne(clean_correct, options.keys())
                 
                 if closest_match and closest_match[1] >= 85:
-                    letter = options[closest_match[0]]
+                    answer_index = options[closest_match[0]]
                     await self.bot.send_message(
                         self.user_id,
-                        f"Правильный ответ:\n{closest_match[0]} ({letter})"
+                        f"Правильный ответ:\n{closest_match[0]}"
                     )
-                    return letter, closest_match[0]
+                    return answer_index
             
             return None
 
@@ -344,30 +343,45 @@ class WebHandler:
                 logger.info(f"🔄 Обработка вопроса {current_question}")
                 
                 try:
+                    # Ждем загрузки вопроса
+                    await page.wait_for_load_state("networkidle")
+                    await page.wait_for_timeout(2000)
+                    
                     question_element = await page.wait_for_selector('//*[@id="xsltforms-subform-0-output-14_4_2_"]/span/span/p')
                     question_text = await question_element.inner_text()
                     
-                    # Получаем букву правильного ответа
-                    result = await self.get_answer(page, question_text)
+                    # Получаем индекс правильного ответа
+                    answer_index = await self.get_answer(page, question_text)
                     
-                    if result:
-                        letter, answer_text = result
-                        # Находим и кликаем по нужному radiobox
-                        radio_selector = f"td.dijitReset:has-text('{letter}')"
-                        await page.click(radio_selector)
-                        correct_answers += 1
-                        
-                        logger.info(f"✅ Выбран ответ {letter}: {answer_text}")
+                    if answer_index:
+                        try:
+                            # Находим и кликаем по нужному радиобоксу
+                            selector = f"table.question_options > tbody > tr:nth-child({answer_index}) td:first-child input[type='radio']"
+                            await page.wait_for_selector(selector)
+                            await page.click(selector)
+                            correct_answers += 1
+                            logger.info(f"✅ Выбран ответ {answer_index}")
+                            
+                            # Ждем применения ответа
+                            await page.wait_for_timeout(1000)
+                            
+                            # Проверяем, есть ли кнопка "Далее"
+                            next_button = await page.query_selector("button:has-text('Далее')")
+                            if next_button:
+                                await next_button.click()
+                            else:
+                                # Если нет кнопки "Далее", значит мы дошли до конца или до решенного вопроса
+                                break
+                                
+                        except Exception as click_error:
+                            logger.error(f"Ошибка при выборе ответа: {click_error}")
+                            break
                     
-                    # Переходим к следующему вопросу
-                    await page.click("text=Далее")
-                    await page.wait_for_load_state("networkidle")
                     current_question -= 1
                     
                 except Exception as e:
                     logger.error(f"Ошибка при обработке вопроса {current_question}: {e}")
-                    current_question -= 1
-                    continue
+                    break
 
             return {
                 "correct": correct_answers,
