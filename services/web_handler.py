@@ -267,11 +267,16 @@ class WebHandler:
             for i, option in enumerate(options, start=1):
                 # 1st td > 2nd div > 1st div > 1st div
                 handle = option.locator(
-                    "td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1)").first
+                    #"td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1)"
+                    "td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > span > span > a > span > i"
+                ).first
+                
+                print(handle)
                 
                 # 3rd td > 1st span > 1st span > 1st span > p
                 text = await option.locator(
-                    "td:nth-child(3) > span:nth-child(1) > span:nth-child(1) > span:nth-child(1) > p").first.text_content()
+                    "td:nth-child(3) > span:nth-child(1) > span:nth-child(1) > span:nth-child(1) > p"
+                ).first.text_content()
                 
                 print(f"Вариант {i}:")
                 options_cleaned[text] = handle
@@ -290,7 +295,7 @@ class WebHandler:
             if correct_answer:
                 await self.bot.send_message(
                     self.user_id,
-                    f"Правильный ответ:\n{correct_answer}"
+                    f"Правильный ответ:\n{correct_answer_verified[0]}"
                 )
                 return options_cleaned[correct_answer_verified[0]]
             
