@@ -274,12 +274,15 @@ class WebHandler:
                 print(handle)
                 
                 # 3rd td > 1st span > 1st span > 1st span > p
-                text = await option.locator(
+                text_loc = option.locator(
                     "td:nth-child(3) > span:nth-child(1) > span:nth-child(1) > span:nth-child(1) > p"
-                ).first.text_content()
+                ).first
+                
+                rel_radiobutton = text_loc.locator('xpath=../../../../../td[1]/div[1]/div[1]/div[1]/span[1]/span[1]/a[1]/span[1]/i[1]')
+                text = await text_loc.text_content()
                 
                 print(f"Вариант {i}:")
-                options_cleaned[text] = handle
+                options_cleaned[text] = rel_radiobutton
                 print(text)
                 print("-" * 40)
             
