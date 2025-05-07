@@ -264,28 +264,30 @@ class WebHandler:
             
             # Получаем все варианты ответов с улучшенной очисткой текста
             answers = await page.evaluate('''() => {
+                const addSpacesBetweenWords = (text) => {
+                    // Добавляем пробелы между словами на основе типичных окончаний
+                    return text
+                        .replace(/(ые|ый|ая|ой|ую|ий|ые)(?=[а-я])/g, '$1 ')  // Окончания прилагательных
+                        .replace(/([а-я])(дистил|аппарат|колб|бан)/g, '$1 $2')  // Начала слов
+                        .replace(/([а-я]{4,})([а-я]{4,})/g, '$1 $2');  // Длинные последовательности букв
+                };
+                
                 const options = Array.from(document.querySelectorAll('.testRadioButton')).map(el => {
-                    // Получаем текст ответа
                     let text = el.closest('tr').textContent.trim();
                     
-                    // Удаляем все звездочки и пробелы
+                    // Базовая очистка
                     text = text.replace(/\*/g, '').trim();
-                    
-                    // Удаляем буквенные обозначения (А, Б, В, Г) в начале и пробел после них
                     text = text.replace(/^[АБВГ]\s*/, '');
-                    
-                    // Удаляем слово "Обоснование" и всё после него
                     text = text.split('Обоснование')[0].trim();
-                    
-                    // Удаляем все лишние пробелы между буквами
                     text = text.replace(/\s+/g, '');
                     
-                    // Добавляем пробелы между словами по правилам русского языка
-                    text = text.replace(/([а-яё])([А-ЯЁ])/g, '$1 $2').toLowerCase();
+                    // Добавляем пробелы между словами
+                    text = addSpacesBetweenWords(text);
                     
                     return text.trim();
                 });
-                return options;
+                
+                return options.map(text => text.toLowerCase());
             }''')
             
             if not answers:
