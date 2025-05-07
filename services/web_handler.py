@@ -262,10 +262,25 @@ class WebHandler:
         try:
             logger.info("🔄 Получаем варианты ответов...")
             
-            # Получаем все варианты ответов
+            # Получаем все варианты ответов с очисткой текста
             answers = await page.evaluate('''() => {
                 const options = Array.from(document.querySelectorAll('.testRadioButton')).map(el => {
-                    return el.closest('tr').textContent.trim();
+                    // Получаем текст ответа
+                    let text = el.closest('tr').textContent.trim();
+                    
+                    // Удаляем все звездочки
+                    text = text.replace(/\*/g, '');
+                    
+                    // Удаляем буквенные обозначения (A, Б, В, Г) в начале
+                    text = text.replace(/^[АБВГ]/, '');
+                    
+                    // Удаляем слово "Обоснование" и всё после него
+                    text = text.split('Обоснование')[0];
+                    
+                    // Добавляем пробелы после слов там, где их нет
+                    text = text.replace(/([а-яА-Я])([а-яА-Я])/g, '$1 $2');
+                    
+                    return text.trim();
                 });
                 return options;
             }''')
@@ -273,6 +288,9 @@ class WebHandler:
             if not answers:
                 logger.error("❌ Не найдены варианты ответов")
                 return None
+                
+            # Удаляем дубликаты ответов
+            answers = list(dict.fromkeys(answers))
                 
             await page.screenshot(path="question_options.png")
             await self._send_info_screenshot(
