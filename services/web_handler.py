@@ -1,23 +1,25 @@
 import asyncio
-from playwright.async_api import async_playwright, TimeoutError
+from playwright.async_api import async_playwright, TimeoutError, Page, Browser
 from aiogram.types import FSInputFile
 import os
 import subprocess
 import logging
-import re
+import urllib.parse
 
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 class WebHandler:
     def __init__(self, bot_instance=None, user_id=None):
         self.base_url = "http://selftest-mpe.mededtech.ru"
         self.bot = bot_instance
         self.user_id = user_id
-        self.browser = None
+        self.browser: Browser = None
         self.context = None
         self.answers_url = "https://www.tests-exam.ru/vopros.html?id_test=719&id_vopros=25565"
+        self.answer_page: Page = None
         self._ensure_playwright_browsers()
 
     def _ensure_playwright_browsers(self):
@@ -35,7 +37,7 @@ class WebHandler:
             logger.info("🔄 Запуск браузера...")
             p = await async_playwright().start()
             self.browser = await p.chromium.launch(
-                headless=True,
+                headless=False,
                 args=['--no-sandbox', '--disable-dev-shm-usage']
             )
             self.context = await self.browser.new_context(
@@ -223,65 +225,67 @@ class WebHandler:
                 f"❌ Ошибка при подготовке теста: {str(e)}"
             )
             raise
-
-    async def get_answer(self, page, question_text: str) -> str:
+    
+    async def parse_answer(self, question_text: str):
+        if not self.answer_page:
+            self.answer_page = await self.browser.new_page()
+        
+        await self.answer_page.goto("https://www.tests-exam.ru/search.html?sea="+urllib.parse.quote_plus(question_text))
+        # переход на страницу с ответом
+        await self.answer_page.click("/html/body/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr/td[2]/div[1]/div[4]/a")
+        
+        return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
+    
+    async def get_answer(self, page: Page, question_text: str) -> str | None:
         try:
-            logger.info("🔄 Ищем ответ на вопрос...")
-            await page.goto(self.answers_url)
-            await page.wait_for_load_state("networkidle")
+            logger.info("🔄 Получаем варианты ответов...")
             
-            # Ожидаем появления поля ввода
-            await page.wait_for_selector('input.zbz-input-clearable')
-            await page.fill('input.zbz-input-clearable', question_text)
+            # Получаем все варианты ответов с улучшенной очисткой текста
+            options = await page.locator(".question_options>tbody>tr").all()
             
-            await page.screenshot(path="search_question.png")
-            await self._send_info_screenshot(
-                "search_question.png",
-                f"Ищем ответ на вопрос:\n{question_text[:100]}..."
-            )
-            
-            # Нажимаем кнопку поиска и ждем результатов
-            await page.click('input[type="submit"][value*="Найти"]')
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(2000)  # Даем время на загрузку результатов
-            
-            # Ищем правильный ответ (с жирным шрифтом)
-            try:
-                correct_answer = await page.evaluate('''() => {
-                    const answers = document.querySelectorAll('.b ul li');
-                    for (let answer of answers) {
-                        if (answer.getAttribute('style') && 
-                            answer.getAttribute('style').includes('font-weight:bold')) {
-                            return answer.textContent.trim();
-                        }
-                    }
-                    return null;
-                }''')
-                
-                if correct_answer:
-                    logger.info(f"✅ Найден правильный ответ: {correct_answer}")
-                    
-                    # Делаем скриншот найденного ответа
-                    await page.screenshot(path="found_answer.png")
-                    await self._send_info_screenshot(
-                        "found_answer.png",
-                        f"Правильный ответ:\n{correct_answer}"
-                    )
-                    
-                    return correct_answer
-                else:
-                    logger.error("❌ Правильный ответ не найден на странице")
-                    return None
-                    
-            except Exception as e:
-                logger.error(f"❌ Ошибка при поиске правильного ответа: {e}")
+            if not options:
+                logger.error("❌ Не найдены варианты ответов")
                 return None
             
+            # Удаляем дубликаты ответов
+            options_cleaned = {}
+            
+            for i, option in enumerate(options, start=1):
+                # 1st td > 2nd div > 1st div > 1st div
+                handle = option.locator(
+                    "td:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1)").first
+                
+                # 3rd td > 1st span > 1st span > 1st span > p
+                text = await option.locator(
+                    "td:nth-child(3) > span:nth-child(1) > span:nth-child(1) > span:nth-child(1) > p").first.text_content()
+                
+                print(f"Вариант {i}:")
+                options_cleaned[text] = handle
+                print("-" * 40)
+            
+            await page.screenshot(path="question_options.png")
+            await self._send_info_screenshot(
+                "question_options.png",
+                f"Вопрос: {question_text}\n\nВарианты ответов:\n" + "\n".join(options_cleaned.keys())
+            )
+            
+            correct_answer = await self.parse_answer(question_text)
+            print(correct_answer)
+            
+            if correct_answer:
+                await self.bot.send_message(
+                    self.user_id,
+                    f"Правильный ответ:\n{correct_answer}"
+                )
+                return correct_answer
+            
+            return None
+        
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске ответа: {e}")
-            await page.screenshot(path="error_search.png")
+            await page.screenshot(path="error_get_answer.png")
             await self._send_error_screenshot(
-                "error_search.png",
+                "error_get_answer.png",
                 f"Ошибка при поиске ответа: {str(e)}"
             )
             return None
