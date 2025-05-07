@@ -232,6 +232,7 @@ class WebHandler:
             self.answer_page = await self.browser.new_page()
         
         url = "https://www.tests-exam.ru/search.html?sea="+parse.quote(question_text.encode('cp1251'))
+        print(url)
         await self.answer_page.goto(url)
         # переход на страницу с ответом
         await self.answer_page.click('//div[@class="b"]/a[@href]')
