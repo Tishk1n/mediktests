@@ -232,7 +232,7 @@ class WebHandler:
         
         await self.answer_page.goto("https://www.tests-exam.ru/search.html?sea="+urllib.parse.quote_plus(question_text))
         # переход на страницу с ответом
-        await self.answer_page.click("/html/body/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr/td[2]/div[1]/div[4]/a")
+        await self.answer_page.click("//div[@class="b"]/a[@href]")
         
         return (await self.answer_page.locator('//*[@id="prav_id"]').text_content()).strip()
     
@@ -261,6 +261,7 @@ class WebHandler:
                 
                 print(f"Вариант {i}:")
                 options_cleaned[text] = handle
+                print(text)
                 print("-" * 40)
             
             await page.screenshot(path="question_options.png")
