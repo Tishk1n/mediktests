@@ -281,6 +281,7 @@ class WebHandler:
             
             correct_answer = await self.parse_answer(question_text)
             print(correct_answer)
+            print(correct_answer in options_cleaned.keys())
             
             if correct_answer:
                 await self.bot.send_message(
