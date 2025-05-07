@@ -37,7 +37,7 @@ class WebHandler:
             logger.info("🔄 Запуск браузера...")
             p = await async_playwright().start()
             self.browser = await p.chromium.launch(
-                headless=False,
+                headless=True,
                 args=['--no-sandbox', '--disable-dev-shm-usage']
             )
             self.context = await self.browser.new_context(
