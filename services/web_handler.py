@@ -398,7 +398,7 @@ class WebHandler:
                     await page.wait_for_load_state("networkidle")
                     
                     # Ищем и выбираем правильный вариант ответа
-                    await correct_answer.click()
+                    await correct_answer.dispatch_event("click")
                 
                 # Возвращаемся к предыдущему вопросу
                 await page.click('#xsltforms-subform-4-label-2_2_2_2_2_10_4_2_')
